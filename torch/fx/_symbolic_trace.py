@@ -182,7 +182,9 @@ class Tracer(TracerBase):
     process. The different behaviors that can be overridden are described
     in the docstrings of the methods on this class.
     """
-    def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ), enable_cpatching: bool = False) -> None:
+    def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ),
+                 enable_cpatching: bool = False,
+                 param_shapes_constant: bool = False) -> None:
         # This method's signature is overridden by the first line of this class'
         # docstring. If this method's signature is modified, the signature that
         # overrides it also should be modified accordingly.
@@ -219,6 +221,7 @@ class Tracer(TracerBase):
         # modules we see while tracing
         self._autowrap_search: List[ModuleType] = list(autowrap_modules)
         self.enable_cpatching = enable_cpatching
+        self.param_shapes_constant = param_shapes_constant
 
         self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
 
@@ -484,10 +487,19 @@ class Tracer(TracerBase):
     def _module_getattr(self, attr, attr_val, parameter_proxy_cache):
         if isinstance(attr_val, torch.nn.Parameter):
             for n, p in self.root.named_parameters():
+                print("mod attr,  fixed", n , p, '.....', self.param_shapes_constant)
+
+                # check if param_shapes_constant is on
                 if attr_val is p:
                     if n not in parameter_proxy_cache:
-                        parameter_proxy_cache[n] = self.create_proxy('get_attr', n, (), {})
+                        if not self.param_shapes_constant:
+                            val_proxy = self.create_proxy(kind, n, (), {})
+                        else:
+                            val_proxy = self.create_proxy('fixed_shape_param', n, (), {}, obj_proxied=attr_val)
+
+                        parameter_proxy_cache[n] = val_proxy
                     return parameter_proxy_cache[n]
+
         return attr_val
 
 
@@ -568,6 +580,8 @@ class Tracer(TracerBase):
                 _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)
                 for module in self._autowrap_search:
                     _autowrap_check(patcher, module.__dict__, self._autowrap_function_ids)
+
+                print("args", args)
                 self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
                                  type_expr=fn.__annotations__.get('return', None))
 
